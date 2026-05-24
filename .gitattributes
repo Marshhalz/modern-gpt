@@ -1,0 +1,17 @@
+# Normalize all text files to LF line endings
+* text=auto eol=lf
+
+# Explicitly mark Python and config files as text
+*.py     text eol=lf
+*.toml   text eol=lf
+*.md     text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.json   text eol=lf
+
+# Binary files — never touch
+*.pt          binary
+*.safetensors binary
+*.bin         binary
+*.png         binary
+*.jpg         binary
