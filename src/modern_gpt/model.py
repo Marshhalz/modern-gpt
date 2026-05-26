@@ -35,6 +35,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .config import GPTConfig
+from .norm import RMSNorm
 
 
 # ---------------------------------------------------------------------------
@@ -121,17 +122,21 @@ class FeedForward(nn.Module):
 class Block(nn.Module):
     """Transformer block: attention then feed-forward, both with residuals.
 
-    Uses pre-norm placement (LayerNorm before each sub-layer), which is more
-    stable than the post-norm variant in the original paper and is now
-    standard in GPT-2, LLaMA, Mistral, and most production LLMs.
+    Uses pre-norm placement (RMSNorm before each sub-layer).  Pre-norm is
+    more stable than the post-norm variant in the original 2017 paper and
+    is now standard in every modern open-weight LLM.
+
+    Normalisation is :class:`RMSNorm` (Zhang & Sennrich, 2019) — the same
+    choice as LLaMA, Mistral, Qwen, DeepSeek.  See ``benchmarks/rmsnorm.md``
+    for the ablation against the original ``nn.LayerNorm`` baseline.
     """
 
     def __init__(self, cfg: GPTConfig) -> None:
         super().__init__()
         self.sa   = MultiHeadAttention(cfg)
         self.ffwd = FeedForward(cfg)
-        self.ln1  = nn.LayerNorm(cfg.n_embd)
-        self.ln2  = nn.LayerNorm(cfg.n_embd)
+        self.ln1  = RMSNorm(cfg.n_embd)
+        self.ln2  = RMSNorm(cfg.n_embd)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.sa(self.ln1(x))
@@ -164,7 +169,7 @@ class GPT(nn.Module):
         self.token_embedding_table    = nn.Embedding(cfg.vocab_size, cfg.n_embd)
         self.position_embedding_table = nn.Embedding(cfg.block_size, cfg.n_embd)
         self.blocks  = nn.Sequential(*[Block(cfg) for _ in range(cfg.n_layer)])
-        self.ln_f    = nn.LayerNorm(cfg.n_embd)
+        self.ln_f    = RMSNorm(cfg.n_embd)
         self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size)
 
         self.apply(self._init_weights)

@@ -85,8 +85,8 @@ while delivering a speed-up).
 
 | # | Change | Status | Train loss | Val loss | Notes |
 |---|--------|--------|-----------:|---------:|-------|
-| 0 | Baseline GPT-2 (LayerNorm, learned PE, ReLU FFN, MHA) | ✅ | **1.3548** | **1.5787** | Reference point — 817K params |
-| 1 | `LayerNorm` → **RMSNorm** | ⬜ Phase 2 | – | – | LLaMA-style, no mean subtraction |
+| 0 | Baseline GPT-2 (LayerNorm, learned PE, ReLU FFN, MHA) | ✅ | 1.3548 | 1.5787 | Reference point — 817K params, ~10 min |
+| 1 | `LayerNorm` → **RMSNorm** | ✅ | **1.3570** | **1.5858** | −1 152 params, ~9 % faster — see [`benchmarks/rmsnorm.md`](benchmarks/rmsnorm.md) |
 | 2 | learned PE → **Rotary Position Embeddings (RoPE)** | ⬜ | – | – | RoFormer (Su et al., 2021) |
 | 3 | ReLU FFN → **SwiGLU** | ⬜ | – | – | Gated activation (Shazeer, 2020) |
 | 4 | MHA → **Grouped-Query Attention (GQA)** | ⬜ | – | – | Memory-efficient inference (LLaMA 2/3) |

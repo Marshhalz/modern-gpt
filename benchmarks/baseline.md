@@ -90,7 +90,7 @@ Reproducible with `python scripts/train.py`.
 | Final train loss | **1.3548** |
 | Final val loss   | **1.5787** |
 | Loss reduction   | 4.17 → 1.58 (62 % relative reduction) |
-| Train time       | ~4 min on RTX 3060 (6 GB)             |
+| Train time       | ~600 s (~10 min) on RTX 3060 (6 GB)   |
 
 These numbers define the bar that every Phase 2 modification must beat
 (or, in the case of efficiency-oriented changes such as FlashAttention,

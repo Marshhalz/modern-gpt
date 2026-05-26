@@ -8,8 +8,9 @@ from .model import (
     Head,
     MultiHeadAttention,
 )
+from .norm import RMSNorm
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "GPTConfig",
@@ -18,4 +19,5 @@ __all__ = [
     "Head",
     "MultiHeadAttention",
     "FeedForward",
+    "RMSNorm",
 ]
