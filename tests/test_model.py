@@ -153,7 +153,33 @@ def test_num_parameters_positive(model: GPT):
 
 
 def test_default_config_params_in_expected_range():
-    """The default (paper-baseline) config should have ~800K params."""
+    """Default config with RoPE should have ~807K params."""
     model = GPT(GPTConfig())
     n = model.num_parameters()
-    assert 700_000 < n < 900_000, f"expected ~800K params, got {n:,}"
+    assert 700_000 < n < 900_000, f"expected ~807K params, got {n:,}"
+
+
+# ---------------------------------------------------------------------------
+# RoPE-specific invariants
+# ---------------------------------------------------------------------------
+
+def test_no_position_embedding_table():
+    """RoPE replaces the learned position table — it must not exist."""
+    model = GPT(GPTConfig())
+    assert not hasattr(model, "position_embedding_table"), (
+        "position_embedding_table should be removed; RoPE encodes position "
+        "via rotation inside attention"
+    )
+
+
+def test_rope_param_reduction_vs_learned_pe():
+    """RoPE removes block_size × n_embd params compared to learned PE."""
+    cfg   = GPTConfig()
+    model = GPT(cfg)
+    n     = model.num_parameters()
+    # 807,361 = 815,553 (RMSNorm baseline) - 8,192 (64×128 position table)
+    expected_rope_savings = cfg.block_size * cfg.n_embd   # 8,192
+    assert n < 815_553, (
+        f"expected fewer params than RMSNorm baseline (815,553) due to "
+        f"removal of {expected_rope_savings}-param position table, got {n:,}"
+    )

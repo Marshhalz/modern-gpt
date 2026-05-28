@@ -1,31 +1,30 @@
 """
-modern-gpt baseline architecture.
+modern-gpt architecture — Phase 2.2 (RoPE).
 
-Vanilla decoder-only Transformer (GPT-2 style):
+Decoder-only Transformer with RMSNorm (Phase 2.1) and Rotary Position
+Embeddings (Phase 2.2):
 
     tokens
       |
-      + token_embedding + position_embedding  (learned)
-      |
-      [ Block ] x n_layer
+      token_embedding                        (learned)
+      |                                      position encoded via RoPE rotation
+      [ Block ] x n_layer                   inside attention, not at input
         |
-        +-- LayerNorm -> MultiHeadAttention -> +
-        |                                       \\
-        +---------------------------------------+  residual
+        +-- RMSNorm -> MultiHeadAttention -> +   (q, k rotated by RoPE)
+        |                                    \\
+        +-----------------------------------+  residual
         |
-        +-- LayerNorm -> FeedForward          -> +
-        |                                       \\
-        +---------------------------------------+  residual
+        +-- RMSNorm -> FeedForward        -> +
+        |                                    \\
+        +-----------------------------------+  residual
       |
-      LayerNorm (final)
+      RMSNorm (final)
       |
       lm_head: Linear(n_embd, vocab_size)
       |
       logits
 
-This baseline (~800K params at default config) is the reference point that
-every subsequent architectural change is benchmarked against.  See the
-roadmap in README.md for the planned modernisation sequence.
+See the roadmap in README.md for the planned modernisation sequence.
 """
 
 from __future__ import annotations
@@ -36,6 +35,7 @@ import torch.nn.functional as F
 
 from .config import GPTConfig
 from .norm import RMSNorm
+from .rope import RotaryEmbedding, apply_rotary
 
 
 # ---------------------------------------------------------------------------
@@ -62,11 +62,19 @@ class Head(nn.Module):
         )
         self.dropout = nn.Dropout(cfg.dropout)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+    ) -> torch.Tensor:
         B, T, _ = x.shape
         k = self.key(x)
         q = self.query(x)
         v = self.value(x)
+
+        q = apply_rotary(q, cos, sin)
+        k = apply_rotary(k, cos, sin)
 
         wei = q @ k.transpose(-2, -1) * (self.head_size ** -0.5)
         wei = wei.masked_fill(self.tril[:T, :T] == 0, float("-inf"))
@@ -86,8 +94,13 @@ class MultiHeadAttention(nn.Module):
         self.proj    = nn.Linear(cfg.n_embd, cfg.n_embd)
         self.dropout = nn.Dropout(cfg.dropout)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = torch.cat([h(x) for h in self.heads], dim=-1)
+    def forward(
+        self,
+        x: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+    ) -> torch.Tensor:
+        out = torch.cat([h(x, cos, sin) for h in self.heads], dim=-1)
         out = self.dropout(self.proj(out))
         return out
 
@@ -138,8 +151,13 @@ class Block(nn.Module):
         self.ln1  = RMSNorm(cfg.n_embd)
         self.ln2  = RMSNorm(cfg.n_embd)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.sa(self.ln1(x))
+    def forward(
+        self,
+        x: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+    ) -> torch.Tensor:
+        x = x + self.sa(self.ln1(x), cos, sin)
         x = x + self.ffwd(self.ln2(x))
         return x
 
@@ -166,9 +184,9 @@ class GPT(nn.Module):
     def __init__(self, cfg: GPTConfig) -> None:
         super().__init__()
         self.cfg = cfg
-        self.token_embedding_table    = nn.Embedding(cfg.vocab_size, cfg.n_embd)
-        self.position_embedding_table = nn.Embedding(cfg.block_size, cfg.n_embd)
-        self.blocks  = nn.Sequential(*[Block(cfg) for _ in range(cfg.n_layer)])
+        self.token_embedding_table = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.rope    = RotaryEmbedding(cfg.head_size, cfg.block_size)
+        self.blocks  = nn.ModuleList([Block(cfg) for _ in range(cfg.n_layer)])
         self.ln_f    = RMSNorm(cfg.n_embd)
         self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size)
 
@@ -210,12 +228,14 @@ class GPT(nn.Module):
         B, T = idx.shape
         device = idx.device
 
-        tok_emb = self.token_embedding_table(idx)
-        pos_emb = self.position_embedding_table(torch.arange(T, device=device))
-        x       = tok_emb + pos_emb
-        x       = self.blocks(x)
-        x       = self.ln_f(x)
-        logits  = self.lm_head(x)
+        x        = self.token_embedding_table(idx)
+        cos, sin = self.rope(T)
+        cos      = cos.to(device)
+        sin      = sin.to(device)
+        for block in self.blocks:
+            x = block(x, cos, sin)
+        x      = self.ln_f(x)
+        logits = self.lm_head(x)
 
         if targets is None:
             return logits, None
@@ -228,8 +248,8 @@ class GPT(nn.Module):
     def generate(self, idx: torch.Tensor, max_new_tokens: int) -> torch.Tensor:
         """Autoregressively sample `max_new_tokens` tokens.
 
-        The input is cropped to the last `block_size` tokens before each
-        forward pass, since the position embedding table has a fixed size.
+        The context is cropped to `block_size` tokens before each forward
+        pass, matching the size of the precomputed RoPE tables.
         """
         for _ in range(max_new_tokens):
             idx_cond  = idx[:, -self.cfg.block_size:]
