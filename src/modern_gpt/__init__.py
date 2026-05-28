@@ -9,8 +9,9 @@ from .model import (
     MultiHeadAttention,
 )
 from .norm import RMSNorm
+from .rope import RotaryEmbedding, apply_rotary, rotate_half
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "GPTConfig",
@@ -20,4 +21,7 @@ __all__ = [
     "MultiHeadAttention",
     "FeedForward",
     "RMSNorm",
+    "RotaryEmbedding",
+    "apply_rotary",
+    "rotate_half",
 ]
