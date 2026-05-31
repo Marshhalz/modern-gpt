@@ -88,7 +88,7 @@ while delivering a speed-up).
 | 0 | Baseline GPT-2 (LayerNorm, learned PE, ReLU FFN, MHA) | ✅ | 1.3548 | 1.5787 | Reference point — 817K params, ~10 min |
 | 1 | `LayerNorm` → **RMSNorm** | ✅ | **1.3570** | **1.5858** | −1 152 params, ~9 % faster — see [`benchmarks/rmsnorm.md`](benchmarks/rmsnorm.md) |
 | 2 | learned PE → **Rotary Position Embeddings (RoPE)** | ✅ | **1.3258** | **1.5474** | −8 192 params, ~30 % slower than RMSNorm (rotation in hot path) — first quality gain above baseline — see [`benchmarks/rope.md`](benchmarks/rope.md) |
-| 3 | ReLU FFN → **SwiGLU** | ⬜ | – | – | Gated activation (Shazeer, 2020) |
+| 3 | ReLU FFN → **SwiGLU** | ✅ | **1.2894** | **1.5281** | +1 536 params, ~10 % slower — best val loss so far — see [`benchmarks/swiglu.md`](benchmarks/swiglu.md) |
 | 4 | MHA → **Grouped-Query Attention (GQA)** | ⬜ | – | – | Memory-efficient inference (LLaMA 2/3) |
 | 5 | **QK-Norm** (cosine attention) | ⬜ | – | – | Connects attention to RKHS kernel theory |
 | 6 | Naive attention → **`F.scaled_dot_product_attention`** | ⬜ | – | – | FlashAttention via PyTorch fused kernel |
@@ -102,23 +102,22 @@ while delivering a speed-up).
 ```
 tokens (B, T)
    │
-   ├── token_embedding (vocab_size, n_embd)
-   └── position_embedding (block_size, n_embd)          ← learned, replaced by RoPE in step 2
+   └── token_embedding (vocab_size, n_embd)             ← position handled by RoPE inside attention
    │
    ▼  (B, T, n_embd)
    │
 ┌──┴─────────────────────────────────────────┐
 │  Block × n_layer                            │
-│    ├── LayerNorm                            │  ← replaced by RMSNorm in step 1
-│    ├── Multi-Head Attention                 │  ← becomes GQA in step 4, FlashAttn in step 6
+│    ├── RMSNorm                              │  ✅ step 1
+│    ├── Multi-Head Attention + RoPE          │  ✅ step 2 — becomes GQA in step 4, FlashAttn in step 6
 │    ├── + residual                           │
-│    ├── LayerNorm                            │
-│    ├── FeedForward (ReLU, 4× expansion)     │  ← becomes SwiGLU in step 3
+│    ├── RMSNorm                              │
+│    ├── SwiGLU (gated, 8/3× expansion)       │  ✅ step 3
 │    └── + residual                           │
 └──┬─────────────────────────────────────────┘
    │
    ▼
-LayerNorm (final)                                       ← also becomes RMSNorm in step 1
+RMSNorm (final)                                         ✅ step 1
    │
    ▼
 lm_head: Linear(n_embd, vocab_size)

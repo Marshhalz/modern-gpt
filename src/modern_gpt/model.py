@@ -1,8 +1,8 @@
 """
-modern-gpt architecture — Phase 2.2 (RoPE).
+modern-gpt architecture — Phase 2.3 (SwiGLU).
 
-Decoder-only Transformer with RMSNorm (Phase 2.1) and Rotary Position
-Embeddings (Phase 2.2):
+Decoder-only Transformer with RMSNorm (Phase 2.1), Rotary Position
+Embeddings (Phase 2.2), and a SwiGLU feed-forward network (Phase 2.3):
 
     tokens
       |
@@ -14,7 +14,7 @@ Embeddings (Phase 2.2):
         |                                    \\
         +-----------------------------------+  residual
         |
-        +-- RMSNorm -> FeedForward        -> +
+        +-- RMSNorm -> SwiGLU             -> +   (gated GLU feed-forward)
         |                                    \\
         +-----------------------------------+  residual
       |
@@ -34,6 +34,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .config import GPTConfig
+from .ffn import SwiGLU
 from .norm import RMSNorm
 from .rope import RotaryEmbedding, apply_rotary
 
@@ -106,29 +107,6 @@ class MultiHeadAttention(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# Feed-forward network
-# ---------------------------------------------------------------------------
-
-class FeedForward(nn.Module):
-    """Per-token MLP — the 'compute' half of a Transformer block.
-
-    Uses the standard 4x expansion ratio from the original 2017 paper.
-    """
-
-    def __init__(self, cfg: GPTConfig) -> None:
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(cfg.n_embd, 4 * cfg.n_embd),
-            nn.ReLU(),
-            nn.Linear(4 * cfg.n_embd, cfg.n_embd),
-            nn.Dropout(cfg.dropout),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
-
-
-# ---------------------------------------------------------------------------
 # Transformer block (pre-norm)
 # ---------------------------------------------------------------------------
 
@@ -139,15 +117,16 @@ class Block(nn.Module):
     more stable than the post-norm variant in the original 2017 paper and
     is now standard in every modern open-weight LLM.
 
-    Normalisation is :class:`RMSNorm` (Zhang & Sennrich, 2019) — the same
-    choice as LLaMA, Mistral, Qwen, DeepSeek.  See ``benchmarks/rmsnorm.md``
-    for the ablation against the original ``nn.LayerNorm`` baseline.
+    Normalisation is :class:`RMSNorm` (Zhang & Sennrich, 2019) and the
+    feed-forward network is :class:`SwiGLU` (Shazeer, 2020) — the same choices
+    as LLaMA, Mistral, Qwen, DeepSeek.  See ``benchmarks/rmsnorm.md`` and
+    ``benchmarks/swiglu.md`` for the ablations against the original baseline.
     """
 
     def __init__(self, cfg: GPTConfig) -> None:
         super().__init__()
         self.sa   = MultiHeadAttention(cfg)
-        self.ffwd = FeedForward(cfg)
+        self.ffwd = SwiGLU(cfg)
         self.ln1  = RMSNorm(cfg.n_embd)
         self.ln2  = RMSNorm(cfg.n_embd)
 

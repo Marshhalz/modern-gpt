@@ -1,17 +1,17 @@
 """modern-gpt — a small GPT progressively upgraded toward the LLaMA 3 architecture."""
 
 from .config import GPTConfig
+from .ffn import SwiGLU
 from .model import (
     GPT,
     Block,
-    FeedForward,
     Head,
     MultiHeadAttention,
 )
 from .norm import RMSNorm
 from .rope import RotaryEmbedding, apply_rotary, rotate_half
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "GPTConfig",
@@ -19,7 +19,7 @@ __all__ = [
     "Block",
     "Head",
     "MultiHeadAttention",
-    "FeedForward",
+    "SwiGLU",
     "RMSNorm",
     "RotaryEmbedding",
     "apply_rotary",
