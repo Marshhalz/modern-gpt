@@ -25,7 +25,8 @@ class GPTConfig:
     vocab_size: int   = 65        # Tiny Shakespeare character vocabulary
     block_size: int   = 64        # context window length (T)
     n_embd:     int   = 128       # residual stream width (C)
-    n_head:     int   = 4         # number of attention heads
+    n_head:     int   = 4         # number of query heads
+    n_kv_head:  int   = 2         # number of key/value heads (GQA); set == n_head for plain MHA
     n_layer:    int   = 4         # number of Transformer blocks
     dropout:    float = 0.1       # dropout probability
 
@@ -37,6 +38,20 @@ class GPTConfig:
                 f"n_embd ({self.n_embd}) must be divisible by n_head ({self.n_head})"
             )
         return self.n_embd // self.n_head
+
+    @property
+    def n_rep(self) -> int:
+        """Number of query heads that share each key/value head (GQA).
+
+        Equals ``n_head // n_kv_head``.  A value of 1 means full multi-head
+        attention (every query head has its own K/V); a value of ``n_head``
+        means multi-query attention (all query heads share one K/V).
+        """
+        if self.n_head % self.n_kv_head != 0:
+            raise ValueError(
+                f"n_head ({self.n_head}) must be divisible by n_kv_head ({self.n_kv_head})"
+            )
+        return self.n_head // self.n_kv_head
 
     @property
     def ffn_hidden_dim(self) -> int:

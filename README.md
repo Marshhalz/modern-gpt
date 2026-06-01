@@ -89,7 +89,7 @@ while delivering a speed-up).
 | 1 | `LayerNorm` → **RMSNorm** | ✅ | **1.3570** | **1.5858** | −1 152 params, ~9 % faster — see [`benchmarks/rmsnorm.md`](benchmarks/rmsnorm.md) |
 | 2 | learned PE → **Rotary Position Embeddings (RoPE)** | ✅ | **1.3258** | **1.5474** | −8 192 params, ~30 % slower than RMSNorm (rotation in hot path) — first quality gain above baseline — see [`benchmarks/rope.md`](benchmarks/rope.md) |
 | 3 | ReLU FFN → **SwiGLU** | ✅ | **1.2894** | **1.5281** | +1 536 params, ~10 % slower — best val loss so far — see [`benchmarks/swiglu.md`](benchmarks/swiglu.md) |
-| 4 | MHA → **Grouped-Query Attention (GQA)** | ⬜ | – | – | Memory-efficient inference (LLaMA 2/3) |
+| 4 | MHA → **Grouped-Query Attention (GQA)** | ✅ | **1.2993** | **1.5350** | −65 536 params, 4→2 KV heads (50 % smaller KV cache) — see [`benchmarks/gqa.md`](benchmarks/gqa.md) |
 | 5 | **QK-Norm** (cosine attention) | ⬜ | – | – | Connects attention to RKHS kernel theory |
 | 6 | Naive attention → **`F.scaled_dot_product_attention`** | ⬜ | – | – | FlashAttention via PyTorch fused kernel |
 | 7 | **KV cache** for inference | ⬜ | – | – | $O(T)$ per step instead of $O(T^2)$ |
@@ -109,7 +109,7 @@ tokens (B, T)
 ┌──┴─────────────────────────────────────────┐
 │  Block × n_layer                            │
 │    ├── RMSNorm                              │  ✅ step 1
-│    ├── Multi-Head Attention + RoPE          │  ✅ step 2 — becomes GQA in step 4, FlashAttn in step 6
+│    ├── Grouped-Query Attention + RoPE       │  ✅ steps 2, 4 (4 Q heads, 2 KV) — FlashAttn in step 6
 │    ├── + residual                           │
 │    ├── RMSNorm                              │
 │    ├── SwiGLU (gated, 8/3× expansion)       │  ✅ step 3

@@ -1,8 +1,9 @@
 """
-modern-gpt architecture — Phase 2.3 (SwiGLU).
+modern-gpt architecture — Phase 2.4 (GQA).
 
 Decoder-only Transformer with RMSNorm (Phase 2.1), Rotary Position
-Embeddings (Phase 2.2), and a SwiGLU feed-forward network (Phase 2.3):
+Embeddings (Phase 2.2), a SwiGLU feed-forward network (Phase 2.3), and
+Grouped-Query Attention (Phase 2.4):
 
     tokens
       |
@@ -10,13 +11,13 @@ Embeddings (Phase 2.2), and a SwiGLU feed-forward network (Phase 2.3):
       |                                      position encoded via RoPE rotation
       [ Block ] x n_layer                   inside attention, not at input
         |
-        +-- RMSNorm -> MultiHeadAttention -> +   (q, k rotated by RoPE)
-        |                                    \\
-        +-----------------------------------+  residual
+        +-- RMSNorm -> GroupedQueryAttention -> +   (q, k rotated by RoPE)
+        |                                       \\
+        +--------------------------------------+  residual
         |
-        +-- RMSNorm -> SwiGLU             -> +   (gated GLU feed-forward)
-        |                                    \\
-        +-----------------------------------+  residual
+        +-- RMSNorm -> SwiGLU                -> +   (gated GLU feed-forward)
+        |                                       \\
+        +--------------------------------------+  residual
       |
       RMSNorm (final)
       |
@@ -33,77 +34,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .attention import GroupedQueryAttention
 from .config import GPTConfig
 from .ffn import SwiGLU
 from .norm import RMSNorm
-from .rope import RotaryEmbedding, apply_rotary
-
-
-# ---------------------------------------------------------------------------
-# Attention
-# ---------------------------------------------------------------------------
-
-class Head(nn.Module):
-    """Single head of causal self-attention.
-
-    Implements the canonical scaled dot-product attention from Vaswani et al.
-    (2017), restricted to a causal (lower-triangular) mask so each position
-    can only attend to itself and earlier positions.
-    """
-
-    def __init__(self, cfg: GPTConfig, head_size: int) -> None:
-        super().__init__()
-        self.head_size = head_size
-        self.key   = nn.Linear(cfg.n_embd, head_size, bias=False)
-        self.query = nn.Linear(cfg.n_embd, head_size, bias=False)
-        self.value = nn.Linear(cfg.n_embd, head_size, bias=False)
-        self.register_buffer(
-            "tril",
-            torch.tril(torch.ones(cfg.block_size, cfg.block_size)),
-        )
-        self.dropout = nn.Dropout(cfg.dropout)
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        cos: torch.Tensor,
-        sin: torch.Tensor,
-    ) -> torch.Tensor:
-        B, T, _ = x.shape
-        k = self.key(x)
-        q = self.query(x)
-        v = self.value(x)
-
-        q = apply_rotary(q, cos, sin)
-        k = apply_rotary(k, cos, sin)
-
-        wei = q @ k.transpose(-2, -1) * (self.head_size ** -0.5)
-        wei = wei.masked_fill(self.tril[:T, :T] == 0, float("-inf"))
-        wei = F.softmax(wei, dim=-1)
-        wei = self.dropout(wei)
-        return wei @ v
-
-
-class MultiHeadAttention(nn.Module):
-    """`n_head` parallel attention heads, concatenated then mixed."""
-
-    def __init__(self, cfg: GPTConfig) -> None:
-        super().__init__()
-        self.heads   = nn.ModuleList(
-            [Head(cfg, cfg.head_size) for _ in range(cfg.n_head)]
-        )
-        self.proj    = nn.Linear(cfg.n_embd, cfg.n_embd)
-        self.dropout = nn.Dropout(cfg.dropout)
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        cos: torch.Tensor,
-        sin: torch.Tensor,
-    ) -> torch.Tensor:
-        out = torch.cat([h(x, cos, sin) for h in self.heads], dim=-1)
-        out = self.dropout(self.proj(out))
-        return out
+from .rope import RotaryEmbedding
 
 
 # ---------------------------------------------------------------------------
@@ -117,15 +52,15 @@ class Block(nn.Module):
     more stable than the post-norm variant in the original 2017 paper and
     is now standard in every modern open-weight LLM.
 
-    Normalisation is :class:`RMSNorm` (Zhang & Sennrich, 2019) and the
-    feed-forward network is :class:`SwiGLU` (Shazeer, 2020) — the same choices
-    as LLaMA, Mistral, Qwen, DeepSeek.  See ``benchmarks/rmsnorm.md`` and
-    ``benchmarks/swiglu.md`` for the ablations against the original baseline.
+    Sub-layers are :class:`GroupedQueryAttention` (Ainslie et al., 2023),
+    :class:`RMSNorm` (Zhang & Sennrich, 2019), and :class:`SwiGLU`
+    (Shazeer, 2020) — the same choices as LLaMA, Mistral, Qwen, DeepSeek.
+    See ``benchmarks/`` for the ablation behind each one.
     """
 
     def __init__(self, cfg: GPTConfig) -> None:
         super().__init__()
-        self.sa   = MultiHeadAttention(cfg)
+        self.sa   = GroupedQueryAttention(cfg)
         self.ffwd = SwiGLU(cfg)
         self.ln1  = RMSNorm(cfg.n_embd)
         self.ln2  = RMSNorm(cfg.n_embd)

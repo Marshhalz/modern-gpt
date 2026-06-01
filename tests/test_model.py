@@ -153,10 +153,10 @@ def test_num_parameters_positive(model: GPT):
 
 
 def test_default_config_params_in_expected_range():
-    """Default config (RoPE + SwiGLU) should have ~809K params."""
+    """Default config (RoPE + SwiGLU + GQA) should have ~743K params."""
     model = GPT(GPTConfig())
     n = model.num_parameters()
-    assert 700_000 < n < 900_000, f"expected ~809K params, got {n:,}"
+    assert 700_000 < n < 800_000, f"expected ~743K params, got {n:,}"
 
 
 # ---------------------------------------------------------------------------
