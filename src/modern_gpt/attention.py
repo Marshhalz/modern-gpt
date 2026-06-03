@@ -29,11 +29,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .config import GPTConfig
+from .norm import RMSNorm
 from .rope import apply_rotary
 
 
 class GroupedQueryAttention(nn.Module):
-    r"""Causal Grouped-Query Attention with rotary position embeddings.
+    r"""Causal Grouped-Query Attention with rotary position embeddings and QK-Norm.
 
     ``n_head`` query heads attend, but only ``n_kv_head`` key/value heads are
     projected and stored; each K/V head is shared across ``n_rep = n_head //
@@ -42,6 +43,12 @@ class GroupedQueryAttention(nn.Module):
     The query projection keeps full width (``n_head * head_size``); the key and
     value projections are narrower (``n_kv_head * head_size``), which is where
     the parameter and KV-cache savings come from.
+
+    **QK-Norm** (Henry et al., 2020): q and k are RMS-normalised per head before
+    the dot product, and the fixed ``1/sqrt(head_size)`` scale is replaced by a
+    learnable temperature.  This bounds the attention logits, preventing softmax
+    saturation as q/k magnitudes grow during training — the dot product of the
+    normalised vectors is a cosine similarity.
     """
 
     def __init__(self, cfg: GPTConfig) -> None:
@@ -55,6 +62,12 @@ class GroupedQueryAttention(nn.Module):
         self.k_proj   = nn.Linear(cfg.n_embd, cfg.n_kv_head * cfg.head_size, bias=False)
         self.v_proj   = nn.Linear(cfg.n_embd, cfg.n_kv_head * cfg.head_size, bias=False)
         self.out_proj = nn.Linear(cfg.n_embd, cfg.n_embd)
+
+        # QK-Norm: normalise q and k per head, with a learnable temperature
+        # in place of the fixed 1/sqrt(head_size) scale.
+        self.q_norm = RMSNorm(cfg.head_size)
+        self.k_norm = RMSNorm(cfg.head_size)
+        self.scale  = nn.Parameter(torch.tensor(cfg.head_size ** -0.5))
 
         self.register_buffer(
             "tril",
@@ -80,11 +93,15 @@ class GroupedQueryAttention(nn.Module):
         q = apply_rotary(q, cos, sin)
         k = apply_rotary(k, cos, sin)
 
+        # QK-Norm: bound the attention logits before scoring
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+
         # share each K/V head across its group of query heads
         k = k.repeat_interleave(self.n_rep, dim=1)   # (B, n_head, T, head_size)
         v = v.repeat_interleave(self.n_rep, dim=1)
 
-        wei = q @ k.transpose(-2, -1) * (self.head_size ** -0.5)
+        wei = q @ k.transpose(-2, -1) * self.scale
         wei = wei.masked_fill(self.tril[:T, :T] == 0, float("-inf"))
         wei = F.softmax(wei, dim=-1)
         wei = self.attn_dropout(wei)

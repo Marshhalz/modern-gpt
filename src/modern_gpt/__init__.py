@@ -10,7 +10,7 @@ from .model import (
 from .norm import RMSNorm
 from .rope import RotaryEmbedding, apply_rotary, rotate_half
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
     "GPTConfig",
