@@ -91,7 +91,7 @@ while delivering a speed-up).
 | 3 | ReLU FFN → **SwiGLU** | ✅ | **1.2894** | **1.5281** | +1 536 params, ~10 % slower — best val loss so far — see [`benchmarks/swiglu.md`](benchmarks/swiglu.md) |
 | 4 | MHA → **Grouped-Query Attention (GQA)** | ✅ | **1.2993** | **1.5350** | −65 536 params, 4→2 KV heads (50 % smaller KV cache) — see [`benchmarks/gqa.md`](benchmarks/gqa.md) |
 | 5 | **QK-Norm** (cosine attention) | ✅ | **1.2932** | **1.5303** | +260 params — bounds attention logits; cosine kernel — see [`benchmarks/qknorm.md`](benchmarks/qknorm.md) |
-| 6 | Naive attention → **`F.scaled_dot_product_attention`** | ⬜ | – | – | FlashAttention via PyTorch fused kernel |
+| 6 | Naive attention → **`F.scaled_dot_product_attention`** | ✅ | **1.2951** | **1.5407** | exact, ~26 % faster (kernel fusion); O(T) memory — see [`benchmarks/flashattention.md`](benchmarks/flashattention.md) |
 | 7 | **KV cache** for inference | ⬜ | – | – | $O(T)$ per step instead of $O(T^2)$ |
 | 8 | **Speculative decoding** | ⬜ | – | – | Draft+verify, 2–3× faster sampling |
 
@@ -109,7 +109,7 @@ tokens (B, T)
 ┌──┴─────────────────────────────────────────┐
 │  Block × n_layer                            │
 │    ├── RMSNorm                              │  ✅ step 1
-│    ├── Grouped-Query Attention + RoPE + QK-Norm │  ✅ steps 2, 4, 5 — FlashAttn in step 6
+│    ├── Grouped-Query Attention + RoPE + QK-Norm │  ✅ steps 2, 4, 5, 6 (FlashAttention via SDPA)
 │    ├── + residual                           │
 │    ├── RMSNorm                              │
 │    ├── SwiGLU (gated, 8/3× expansion)       │  ✅ step 3

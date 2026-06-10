@@ -49,6 +49,12 @@ class GroupedQueryAttention(nn.Module):
     learnable temperature.  This bounds the attention logits, preventing softmax
     saturation as q/k magnitudes grow during training — the dot product of the
     normalised vectors is a cosine similarity.
+
+    **FlashAttention** (Dao et al., 2022): the score → softmax → value pipeline is
+    delegated to :func:`torch.nn.functional.scaled_dot_product_attention`, which
+    dispatches to the fused, IO-aware FlashAttention kernel.  This is exact (same
+    output as the manual path), uses O(T) memory instead of O(T²), and fuses the
+    ops into a single kernel launch.
     """
 
     def __init__(self, cfg: GPTConfig) -> None:
@@ -69,12 +75,11 @@ class GroupedQueryAttention(nn.Module):
         self.k_norm = RMSNorm(cfg.head_size)
         self.scale  = nn.Parameter(torch.tensor(cfg.head_size ** -0.5))
 
-        self.register_buffer(
-            "tril",
-            torch.tril(torch.ones(cfg.block_size, cfg.block_size)),
-        )
-        self.attn_dropout  = nn.Dropout(cfg.dropout)
-        self.resid_dropout = nn.Dropout(cfg.dropout)
+        # Attention dropout is applied inside scaled_dot_product_attention, so we
+        # keep the probability as a float rather than an nn.Dropout module. The
+        # causal mask is handled by is_causal=True (no tril buffer needed).
+        self.attn_dropout_p = cfg.dropout
+        self.resid_dropout  = nn.Dropout(cfg.dropout)
 
     def forward(
         self,
@@ -93,19 +98,25 @@ class GroupedQueryAttention(nn.Module):
         q = apply_rotary(q, cos, sin)
         k = apply_rotary(k, cos, sin)
 
-        # QK-Norm: bound the attention logits before scoring
+        # QK-Norm: bound the attention logits before scoring.
         q = self.q_norm(q)
         k = self.k_norm(k)
+        # Fold the learnable temperature into q so we can pass scale=1.0 to SDPA
+        # (its scale arg takes a float; folding keeps self.scale trainable).
+        q = q * self.scale
 
         # share each K/V head across its group of query heads
         k = k.repeat_interleave(self.n_rep, dim=1)   # (B, n_head, T, head_size)
         v = v.repeat_interleave(self.n_rep, dim=1)
 
-        wei = q @ k.transpose(-2, -1) * self.scale
-        wei = wei.masked_fill(self.tril[:T, :T] == 0, float("-inf"))
-        wei = F.softmax(wei, dim=-1)
-        wei = self.attn_dropout(wei)
-        out = wei @ v                                 # (B, n_head, T, head_size)
+        # FlashAttention via PyTorch's fused kernel. is_causal=True applies the
+        # causal mask inside the kernel; dropout is applied internally.
+        out = F.scaled_dot_product_attention(
+            q, k, v,
+            is_causal=True,
+            dropout_p=self.attn_dropout_p if self.training else 0.0,
+            scale=1.0,
+        )                                             # (B, n_head, T, head_size)
 
         out = out.transpose(1, 2).contiguous().view(B, T, C)
         return self.resid_dropout(self.out_proj(out))

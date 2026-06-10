@@ -1,10 +1,10 @@
 """
-modern-gpt architecture — Phase 2.5 (QK-Norm).
+modern-gpt architecture — Phase 2.6 (FlashAttention).
 
 Decoder-only Transformer with RMSNorm (Phase 2.1), Rotary Position
 Embeddings (Phase 2.2), a SwiGLU feed-forward network (Phase 2.3),
-Grouped-Query Attention (Phase 2.4), and QK-Norm cosine attention
-(Phase 2.5):
+Grouped-Query Attention (Phase 2.4), QK-Norm cosine attention (Phase 2.5),
+and FlashAttention via the fused SDPA kernel (Phase 2.6):
 
     tokens
       |

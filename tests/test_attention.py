@@ -144,7 +144,8 @@ def test_qknorm_bounds_logits_under_large_inputs():
             q, k = attn.q_norm(q), attn.k_norm(k)
             k = k.repeat_interleave(attn.n_rep, dim=1)
             wei = q @ k.transpose(-2, -1) * attn.scale
-            wei = wei.masked_fill(attn.tril[:T, :T] == 0, float("-inf"))
+            causal = torch.tril(torch.ones(T, T))            # is_causal mask, built locally
+            wei = wei.masked_fill(causal == 0, float("-inf"))
             p = torch.softmax(wei, dim=-1)
             return -(p * torch.log(p + 1e-9)).sum(-1).mean().item()
 
