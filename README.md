@@ -92,6 +92,7 @@ while delivering a speed-up).
 | 4 | MHA → **Grouped-Query Attention (GQA)** | ✅ | **1.2993** | **1.5350** | −65 536 params, 4→2 KV heads (50 % smaller KV cache) — see [`benchmarks/gqa.md`](benchmarks/gqa.md) |
 | 5 | **QK-Norm** (cosine attention) | ✅ | **1.2932** | **1.5303** | +260 params — bounds attention logits; cosine kernel — see [`benchmarks/qknorm.md`](benchmarks/qknorm.md) |
 | 6 | Naive attention → **`F.scaled_dot_product_attention`** | ✅ | **1.2951** | **1.5407** | exact, ~26 % faster (kernel fusion); O(T) memory — see [`benchmarks/flashattention.md`](benchmarks/flashattention.md) |
+| — | **Scaling law study** (Phase 3.1) | ✅ | – | – | `L(N) = 4.306·N^(−0.1191) + 1.690`; **0.37% prediction error** on held-out model — see [`benchmarks/scaling-laws.md`](benchmarks/scaling-laws.md) |
 | 7 | **KV cache** for inference | ⬜ | – | – | $O(T)$ per step instead of $O(T^2)$ |
 | 8 | **Speculative decoding** | ⬜ | – | – | Draft+verify, 2–3× faster sampling |
 
